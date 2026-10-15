@@ -4,8 +4,8 @@ Cambios respecto al Taller 1:
 - Nueva intención "informacion" (y también "otro"): se responde con la cadena RAG (src/rag.py). Antes se
   escalaba todo a un humano; ahora el asistente responde si la base de conocimiento lo permite y, si no,
   dice con honestidad que no tiene la información.
-- Devoluciones: la política y el catálogo ya no se pegan completos en el prompt v4; se recuperan de la base
-  vectorial solo los fragmentos relevantes para el mensaje.
+- Devoluciones: el catálogo ya no se pega completo en el prompt v4; se recuperan los productos más parecidos al
+  mensaje. La política se recupera completa por metadatos (ver contexto_devolucion).
 - Pedidos: se pasan al prompt solo los pedidos cuyo número menciona el cliente (búsqueda exacta, sin RAG).
 """
 
@@ -15,8 +15,7 @@ from src.llm import completar
 
 INTENCIONES = {"pedido", "devolucion", "informacion", "queja", "otro"}
 
-# Cuántos fragmentos se recuperan para armar el contexto del prompt v4 de devoluciones.
-K_POLITICA = 4
+# Cuántos productos se recuperan para armar el contexto del prompt v4 de devoluciones.
 K_CATALOGO = 3
 
 
@@ -53,19 +52,26 @@ def _escalar(mensaje: str, clasificacion: dict | None, motivo: str) -> dict:
 
 
 def contexto_devolucion(mensaje: str) -> tuple[dict, list[str]]:
-    """Arma {politica, catalogo, pedidos} para el prompt v4 de devoluciones.
+    """Arma {politica, catalogo, pedidos} para el prompt v4 de devoluciones (recuperación híbrida).
 
-    Se filtra por fuente/tipo en Chroma (filtro de metadatos) y se usa umbral 0: la clasificación ya dijo que
-    es una devolución, así que siempre se quieren las secciones de política y los productos más cercanos.
+    - Catálogo: búsqueda por similitud entre los productos (filtro tipo=producto, umbral 0 porque el
+      clasificador ya decidió que es una devolución). Es la parte que crece con el negocio y la que de verdad
+      hay que buscar; el producto correcto sale primero en todos los casos de prueba.
+    - Política: se recuperan sus 7 secciones completas por metadatos, no por similitud. Medido en
+      `python app.py experimento-recuperacion` §4: buscando las 4 secciones más parecidas solo llegaban las
+      reglas necesarias en 2 de 8 casos, porque "quiero devolver el cepillo de dientes" no se parece a "Higiene
+      personal: no se aceptan devoluciones" (hay que pasar por la categoría del producto). La política es corta
+      (~600 tokens) y sus reglas dependen unas de otras (plazo, excepción por daño, no devolvibles).
     """
-    politica = rag.recuperar(mensaje, k=K_POLITICA, umbral=0, filtro={"fuente": "politica_devoluciones.pdf"})
+    politica = rag.fragmentos_de({"fuente": "politica_devoluciones.pdf"})
     catalogo = rag.recuperar(mensaje, k=K_CATALOGO, umbral=0, filtro={"tipo": "producto"})
     valores = {
         "politica": rag.formatear_contexto(politica),
-        "catalogo": rag.formatear_contexto(catalogo),
+        "catalogo": rag.formatear_contexto([d for d, _ in catalogo]),
         "pedidos": contexto.pedidos_texto(contexto.numeros_pedido(mensaje)),
     }
-    fuentes = [f"{d.metadata['fuente']} › {d.metadata['seccion']} (sim. {s:.3f})" for d, s in politica + catalogo]
+    fuentes = [f"politica_devoluciones.pdf completa ({len(politica)} secciones, por metadatos)"]
+    fuentes += [f"{d.metadata['fuente']} › {d.metadata['seccion']} (sim. {s:.3f})" for d, s in catalogo]
     return valores, fuentes
 
 
@@ -112,7 +118,7 @@ def responder(mensaje: str) -> dict:
         r = responder_devolucion_v4(mensaje)
         if not r["ok"]:
             return _escalar(mensaje, clasificacion, "JSON de devoluciones no interpretable")
-        return {"ruta": "devoluciones v4 + RAG", "clasificacion": clasificacion,
+        return {"ruta": "devoluciones v4 + RAG (productos) + política completa", "clasificacion": clasificacion,
                 "respuesta": r["respuesta_cliente"], "fuentes": r["fuentes"]}
 
     # informacion u otro: la base de conocimiento decide si hay respuesta.

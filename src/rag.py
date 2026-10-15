@@ -36,11 +36,22 @@ def recuperar(consulta: str, k: int = RAG_K, umbral: float = RAG_UMBRAL,
     return [(doc, score) for doc, score in pares if score >= umbral]
 
 
-def formatear_contexto(pares: list[tuple[Document, float]]) -> str:
+def fragmentos_de(filtro: dict) -> list[Document]:
+    """Todos los fragmentos que cumplen un filtro de metadatos, en el orden original del documento.
+
+    Es recuperación por metadatos, no por similitud: se usa cuando un documento es corto y sus reglas
+    dependen unas de otras, como la política de devoluciones (ver src/cadena.py).
+    """
+    datos = _base_vectorial().get(where=filtro)
+    pares = sorted(zip(datos["ids"], datos["documents"], datos["metadatas"]))
+    return [Document(page_content=texto, metadata=meta) for _, texto, meta in pares]
+
+
+def formatear_contexto(docs: list[Document]) -> str:
     """Fragmentos numerados con su fuente, para que el modelo pueda citarlos como [1], [2]..."""
     return "\n\n".join(
         f"[{i}] (fuente: {doc.metadata['fuente']} › {doc.metadata['seccion']})\n{doc.page_content}"
-        for i, (doc, _) in enumerate(pares, start=1)
+        for i, doc in enumerate(docs, start=1)
     )
 
 
@@ -55,7 +66,7 @@ def construir_cadena(version: str = "v2", k: int = RAG_K, umbral: float = RAG_UM
     paso_prompt = RunnableLambda(lambda d: {
         **d,
         "mensajes": prompts.construir_mensajes("rag", version, d["consulta"],
-                                               {"contexto": formatear_contexto(d["pares"])}),
+                                               {"contexto": formatear_contexto([doc for doc, _ in d["pares"]])}),
     })
 
     paso_llm = RunnableLambda(lambda d: {

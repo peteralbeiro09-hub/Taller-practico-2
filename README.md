@@ -19,18 +19,32 @@ En el Taller 1 el asistente de EcoMarket respondía dos tipos de consulta (pedid
 | 2. Base de conocimiento | [docs/fase2_base_conocimiento.md](docs/fase2_base_conocimiento.md) · [data/](data/) | 4 tipos de documento, estrategia de *chunking* comparada con datos, proceso de indexación |
 | 3. Integración y código | [docs/fase3_integracion.md](docs/fase3_integracion.md) · [src/](src/) · [results/](results/) | Explicación del código por sección, cambios sobre el Taller 1, experimentos, limitaciones y suposiciones |
 
+## Estado de la entrega
+
+| Componente | Estado | Evidencia |
+|---|---|---|
+| Fase 1: embeddings y base vectorial | ✅ Completa | [docs/fase1_componentes.md](docs/fase1_componentes.md) |
+| Fase 2: documentos, chunking e indexación | ✅ Completa, con experimento medido | [docs/fase2_base_conocimiento.md](docs/fase2_base_conocimiento.md) · [results/experimento_recuperacion.md](results/experimento_recuperacion.md) |
+| Fase 3: código RAG integrado al asistente del Taller 1 | ✅ Implementado y ejecutable | [src/](src/) · [docs/fase3_integracion.md](docs/fase3_integracion.md) |
+| Fase 3: sin RAG vs RAG v1 vs RAG v2, iteración 1 (fragmentos de 600) | ✅ 45 respuestas reales | [results/resultados_rag_iteracion1.md](results/resultados_rag_iteracion1.md) |
+| Fase 3: sin RAG vs RAG v1 vs RAG v2, versión final (fragmentos de 1000) | ◐ 38 de 48 respuestas; faltan 10 por la cuota diaria | [results/resultados_rag.md](results/resultados_rag.md) |
+| Fase 3: cadena completa (regresión del Taller 1 + casos nuevos) | ◐ Pendiente de ejecutar con el LLM (~40 llamadas) | [results/resultados_cadena.md](results/resultados_cadena.md) |
+| Limitaciones y suposiciones | ✅ | [docs/fase3_integracion.md §6](docs/fase3_integracion.md#6-limitaciones-y-suposiciones) |
+
+**Por qué hay respuestas pendientes:** el endpoint gratuito de OpenRouter permite **50 llamadas por día**. Las pendientes se completan con `python app.py evaluar`, que retoma sin repetir lo ya obtenido.
+
 ## Arquitectura
 
 ```mermaid
 flowchart LR
     M[Mensaje del cliente] --> CLA{Clasificador<br/>de intención<br/>Taller 1}
     CLA -->|pedido| BD[Búsqueda exacta<br/>pedidos.json] --> P4[Prompt pedidos v4]
-    CLA -->|devolución| RD[RAG filtrado:<br/>política + productos] --> D4[Prompt devoluciones v4]
+    CLA -->|devolución| RD[RAG de productos<br/>+ política completa] --> D4[Prompt devoluciones v4]
     CLA -->|información / otro| RAG[RAG: embeddings e5<br/>+ ChromaDB + umbral]
     RAG -->|similitud ≥ umbral| V2[Prompt RAG v2<br/>con citas]
     RAG -->|similitud < umbral| NS[“No tengo esa información”<br/>sin llamar al LLM]
     CLA -->|queja o sentimiento negativo| HUM[Agente humano]
-    P4 --> LLM[LLM Qwen<br/>vía OpenRouter]
+    P4 --> LLM[LLM de pesos abiertos<br/>vía OpenRouter]
     D4 --> LLM
     V2 --> LLM
 ```
@@ -40,7 +54,7 @@ flowchart LR
 | Framework | LangChain (loaders, splitters, `HuggingFaceEmbeddings`, `Chroma`, LCEL) | `src/ingesta.py`, `src/indice.py`, `src/rag.py` |
 | Embeddings | `intfloat/multilingual-e5-small` (abierto, local, español) | `src/indice.py` |
 | Base vectorial | ChromaDB embebida y persistente, similitud coseno | `chroma_db/` (se genera) |
-| LLM | El mismo del Taller 1: Qwen gratis vía OpenRouter (o Ollama/Groq/OpenAI desde `.env`) | `src/llm.py` |
+| LLM | El mismo cliente del Taller 1 (`src/llm.py`) con un modelo de pesos abiertos gratis vía OpenRouter: `nvidia/nemotron-3-super-120b-a12b:free`, porque el Qwen del Taller 1 ya no se ofrece gratis (ver [limitaciones](docs/fase3_integracion.md#6-limitaciones-y-suposiciones)). Ollama, Groq u OpenAI se configuran desde `.env` | `src/llm.py` |
 
 ## Ejecución
 

@@ -55,49 +55,80 @@
       "id": "D1",
       "caso": "Devolvible dentro de plazo",
       "consulta": "Hola, quiero devolver la botella reutilizable de mi pedido ECO-10001. No la he usado y está en su empaque.",
-      "esperado": "Aprueba y guía el proceso paso a paso (entregado el 2026-09-10, 10 días)."
+      "esperado": "Aprueba y guía el proceso paso a paso (entregado el 2026-09-10, 10 días).",
+      "secciones_politica": [
+        "1",
+        "5"
+      ],
+      "producto": "Botella reutilizable de acero inoxidable 750 ml"
     },
     {
       "id": "D2",
       "caso": "Devolvible fuera de plazo",
       "consulta": "Quiero devolver la camiseta de algodón orgánico del pedido ECO-10002, no me quedó bien.",
-      "esperado": "Niega con empatía (entregado el 2026-08-04, más de 30 días) y ofrece una alternativa."
+      "esperado": "Niega con empatía (entregado el 2026-08-04, más de 30 días) y ofrece una alternativa.",
+      "secciones_politica": [
+        "1"
+      ],
+      "producto": "Camiseta de algodón orgánico"
     },
     {
       "id": "D3",
       "caso": "Perecedero",
       "consulta": "¿Puedo devolver los snacks de frutas deshidratadas del pedido ECO-10001? Ya no los quiero.",
-      "esperado": "Niega con empatía porque es perecedero y ofrece una alternativa."
+      "esperado": "Niega con empatía porque es perecedero y ofrece una alternativa.",
+      "secciones_politica": [
+        "3"
+      ],
+      "producto": "Snacks de frutas deshidratadas"
     },
     {
       "id": "D4",
       "caso": "Higiene personal",
       "consulta": "Quiero devolver el cepillo de dientes de bambú del pedido ECO-10004, no me gustó.",
-      "esperado": "Niega con empatía porque es de higiene personal y ofrece una alternativa."
+      "esperado": "Niega con empatía porque es de higiene personal y ofrece una alternativa.",
+      "secciones_politica": [
+        "3"
+      ],
+      "producto": "Cepillo de dientes de bambú"
     },
     {
       "id": "D5",
       "caso": "Perecedero que llegó dañado",
       "consulta": "Quiero devolver el café orgánico del pedido ECO-10003. Llegó con el empaque roto y el café regado. Tengo fotos.",
-      "esperado": "Aplica la excepción por daño (entregado el 2026-09-19, dentro de 48 h): ofrece reposición o reembolso y pide la foto."
+      "esperado": "Aplica la excepción por daño (entregado el 2026-09-19, dentro de 48 h): ofrece reposición o reembolso y pide la foto.",
+      "secciones_politica": [
+        "4"
+      ],
+      "producto": "Café orgánico de origen colombiano 500 g"
     },
     {
       "id": "D6",
       "caso": "Personalizado",
       "consulta": "Me arrepentí del termo grabado del pedido ECO-10004, ¿lo puedo devolver?",
-      "esperado": "Niega con empatía porque es personalizado y ofrece una alternativa."
+      "esperado": "Niega con empatía porque es personalizado y ofrece una alternativa.",
+      "secciones_politica": [
+        "3"
+      ],
+      "producto": "Termo grabado con nombre"
     },
     {
       "id": "D7",
       "caso": "Producto que no está en el catálogo",
       "consulta": "Quiero devolver el cargador solar portátil que compré la semana pasada.",
-      "esperado": "Indica que no encuentra ese producto en el catálogo y pide más datos. No inventa condiciones."
+      "esperado": "Indica que no encuentra ese producto en el catálogo y pide más datos. No inventa condiciones.",
+      "secciones_politica": [],
+      "producto": null
     },
     {
       "id": "D8",
       "caso": "Cliente molesto",
       "consulta": "¡Estoy harta! La botella de mi pedido ECO-10001 gotea desde el primer día y nadie me responde. Quiero una solución ya.",
-      "esperado": "Responde con empatía, aplica la reposición o el reembolso por defecto y ofrece escalar a un agente humano."
+      "esperado": "Responde con empatía, aplica la reposición o el reembolso por defecto y ofrece escalar a un agente humano.",
+      "secciones_politica": [
+        "4"
+      ],
+      "producto": "Botella reutilizable de acero inoxidable 750 ml"
     }
   ],
   "informacion": [

@@ -42,7 +42,7 @@ Con esto, los criterios para elegir los componentes son, en orden de peso:
 - **Costo:** se ejecuta en CPU, sin GPU ni pago por token. Una consulta se vectoriza en milisegundos, despreciable frente a la latencia del LLM, que es de segundos.
 - **Privacidad:** las consultas de los clientes pueden incluir nombres, direcciones o detalles de salud (por ejemplo, la copa menstrual). Con un modelo local nunca salen del servidor, lo que simplifica cumplir la Ley 1581, analizada en la Fase 2 del Taller 1.
 - **Contexto de 512 tokens:** basta para nuestros fragmentos (~600 caracteres ≈ 150 tokens). En cambio, MiniLM se queda en 128 tokens y truncaría secciones de la política.
-- **Código abierto:** es coherente con la decisión del Taller 1 de usar un LLM de pesos abiertos (Qwen) y evita depender de un solo proveedor.
+- **Código abierto:** es coherente con la decisión del Taller 1 de usar un LLM de pesos abiertos (Qwen en el Taller 1; Nemotron 3 Super en este, ver Fase 3 §6) y evita depender de un solo proveedor.
 
 **Detalle técnico que importa:** los modelos E5 se entrenaron con el prefijo `query:` en las preguntas y `passage:` en los documentos. Sin los prefijos la recuperación empeora. Por eso `src/indice.py` envuelve el modelo en la clase `EmbeddingsE5`, que los agrega automáticamente. Además, los vectores se **normalizan**, de modo que la similitud coseno de ChromaDB queda entre 0 y 1 y se puede fijar un **umbral** para decir "no sé".
 
@@ -72,7 +72,7 @@ Con esto, los criterios para elegir los componentes son, en orden de peso:
 
 - **El tamaño real del problema es pequeño.** La base de conocimiento son cuatro documentos y decenas de fragmentos; aunque crezca a todo el catálogo y a cientos de preguntas frecuentes, serán miles de vectores, no millones. A esa escala la búsqueda exacta o HNSW en un solo nodo tarda milisegundos. Pagar Pinecone u operar un clúster de Weaviate sería sobredimensionar.
 - **Costo cero y misma infraestructura.** Se instala como librería y guarda el índice en `chroma_db/`, junto al orquestador del Taller 1. No hay servicio adicional que pagar ni administrar.
-- **Filtros por metadatos.** Cada fragmento lleva `fuente`, `tipo`, `seccion` y `categoria`. La cadena los usa: para devoluciones solo busca en la política y en los productos (`filter={"fuente": "politica_devoluciones.pdf"}`).
+- **Filtros por metadatos.** Cada fragmento lleva `fuente`, `tipo`, `seccion` y `categoria`. La cadena los usa: en devoluciones busca solo entre los productos (`filter={"tipo": "producto"}`) y trae la política completa con `get(where={"fuente": "politica_devoluciones.pdf"})`.
 - **Privacidad:** los documentos internos no salen del servidor, igual que con el modelo de embeddings local.
 - **Integración con LangChain** directa (`Chroma`, `similarity_search_with_relevance_scores`) y similitud coseno configurable (`hnsw:space = cosine`).
 
@@ -95,10 +95,10 @@ flowchart LR
     V -->|top-k fragmentos<br/>con similitud| U{¿Similitud ≥ umbral?}
     U -->|no| N[“No tengo esa información”<br/>+ ofrecer agente humano]
     U -->|sí| P[Prompt v2 con<br/>fragmentos numerados]
-    P --> L[LLM Qwen<br/>del Taller 1]
+    P --> L[LLM de pesos abiertos<br/>cliente del Taller 1]
     L --> R[Respuesta con citas]
 ```
 
 - **El modelo de embeddings decide el *recall*.** Si "¿me devuelven la plata?" no queda cerca de "Reembolso al medio de pago original", el fragmento correcto nunca llega al LLM, y ningún prompt lo compensa. Por eso pesa tanto la calidad en español.
 - **La base vectorial decide la latencia, los filtros y la escalabilidad.** Además, su puntaje de similitud permite fijar el **umbral** que separa "sé la respuesta" de "no sé", que es la pieza clave para responder ante **cualquier** solicitud sin alucinar.
-- **El LLM ya no necesita "saber" de EcoMarket.** Solo debe leer y redactar a partir del contexto. Eso permite seguir usando un modelo abierto y barato como Qwen (Taller 1) y actualizar la información **reindexando**, sin reentrenar nada.
+- **El LLM ya no necesita "saber" de EcoMarket.** Solo debe leer y redactar a partir del contexto. Eso permite seguir usando un modelo abierto y barato (Qwen en el Taller 1, Nemotron aquí) y actualizar la información **reindexando**, sin reentrenar nada.

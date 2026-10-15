@@ -86,7 +86,7 @@ def cmd_preguntar(args):
         else:
             pares = rag.recuperar(args.texto, args.k, args.umbral)
             mensajes = prompts.construir_mensajes("rag", args.version, args.texto,
-                                                  {"contexto": rag.formatear_contexto(pares)})
+                                                  {"contexto": rag.formatear_contexto([d for d, _ in pares])})
         for m in mensajes:
             print(f"--- [{m['role']}] ---\n{m['content']}\n")
         return
@@ -129,7 +129,8 @@ def _encabezado(titulo: str, descripcion: str, con_llm: bool = True) -> list[str
     return [
         f"# {titulo}",
         "",
-        f"- **LLM:** {modelo}**Embeddings:** `{MODELO_EMBEDDINGS}` · **k:** {RAG_K} · **Umbral:** {RAG_UMBRAL}"
+        f"- **LLM:** {modelo}**Embeddings:** `{MODELO_EMBEDDINGS}` · **k:** {RAG_K} · **Umbral:** {RAG_UMBRAL} · "
+        f"**Fragmento máx.:** {CHUNK_TAMANO} caracteres"
         if con_llm else f"- **Embeddings:** `{MODELO_EMBEDDINGS}` · **Base vectorial:** ChromaDB (coseno)",
         f"- **Ejecutado:** {datetime.now():%Y-%m-%d %H:%M} · **Fecha de referencia:** {FECHA_REFERENCIA}",
         "- Salidas reales generadas por `python app.py`, sin edición manual.",
@@ -174,42 +175,47 @@ def cmd_experimento_recuperacion(_args):
         "Experimento — Estrategias de segmentación y umbral de similitud",
         "Mide solo la **recuperación** (embeddings + ChromaDB), sin llamar al LLM. Un acierto significa que, entre "
         f"los primeros k fragmentos, hay uno que contiene **toda** la evidencia esperada del caso "
-        f"(columna *Evidencia* de `data/casos_prueba.json`). Tamaño de chunk: {CHUNK_TAMANO} caracteres; "
-        f"solape (solo en la estrategia por estructura): {CHUNK_SOLAPE}.",
+        f"(columna *Evidencia* de `data/casos_prueba.json`). Se prueban dos tamaños máximos de fragmento; el configurado "
+        f"es {CHUNK_TAMANO} caracteres. Solape (solo en la división recursiva de la estrategia por estructura): {CHUNK_SOLAPE}.",
         con_llm=False,
     )
 
-    resumen = ["## 1. Resumen por estrategia", "",
-               "| Estrategia | Fragmentos | Largo medio (car.) | Mezclan varios productos o preguntas | Acierto@1 | Acierto@3 | Acierto@5 | MRR |",
-               "|---|---|---|---|---|---|---|---|"]
-    detalle = ["## 2. Posición del fragmento correcto por caso", "",
+    resumen = ["## 1. Resumen por estrategia y tamaño de fragmento", "",
+               "| Estrategia | Tamaño máx. | Fragmentos | Largo medio (car.) | Mezclan varios productos o preguntas | "
+               "Acierto@1 | Acierto@3 | Acierto@5 | MRR |",
+               "|---|---|---|---|---|---|---|---|---|"]
+    detalle = [f"## 2. Posición del fragmento correcto por caso (tamaño {CHUNK_TAMANO})", "",
                "| Caso | Consulta | Evidencia | " + " | ".join(ESTRATEGIAS) + " |",
                "|---|---|---|" + "---|" * len(ESTRATEGIAS)]
     posiciones: dict[str, list] = {}
     sims_info, sims_fuera = [], []
 
+    tamanos = sorted({600, CHUNK_TAMANO})
     for estrategia in ESTRATEGIAS:
-        print(f"Indexando en memoria con la estrategia {estrategia}...", file=sys.stderr)
-        fragmentos = fragmentar(estrategia)
-        bd = construir_indice(fragmentos, directorio=None, coleccion=f"exp_{estrategia}")
-        rangos = []
-        for caso in info:
-            pares = bd.similarity_search_with_relevance_scores(caso["consulta"], k=k_max)
-            rangos.append(_rango(pares, caso["evidencia"]))
-            if estrategia == "estructura":
-                sims_info.append((caso, pares[0][1], pares[0][0]))
-        if estrategia == "estructura":
-            for caso in fuera:
-                pares = bd.similarity_search_with_relevance_scores(caso["consulta"], k=1)
-                sims_fuera.append((caso, pares[0][1], pares[0][0]))
-        posiciones[estrategia] = rangos
-        n = len(rangos)
-        acierto = lambda k: sum(1 for r in rangos if r and r <= k) / n
-        mrr = sum(1 / r for r in rangos if r) / n
-        largo = statistics.mean(len(f.page_content) for f in fragmentos)
-        mezclan = sum(1 for f in fragmentos if _unidades(f.page_content) > 1)
-        resumen.append(f"| {estrategia} | {len(fragmentos)} | {largo:.0f} | {mezclan} | {acierto(1):.0%} | {acierto(3):.0%} | "
-                       f"{acierto(5):.0%} | {mrr:.2f} |")
+        for tamano in tamanos:
+            print(f"Indexando en memoria: estrategia {estrategia}, tamaño {tamano}...", file=sys.stderr)
+            fragmentos = fragmentar(estrategia, tamano)
+            bd = construir_indice(fragmentos, directorio=None, coleccion=f"exp_{estrategia}_{tamano}")
+            principal = tamano == CHUNK_TAMANO
+            rangos = []
+            for caso in info:
+                pares = bd.similarity_search_with_relevance_scores(caso["consulta"], k=k_max)
+                rangos.append(_rango(pares, caso["evidencia"]))
+                if estrategia == "estructura" and principal:
+                    sims_info.append((caso, pares[0][1], pares[0][0]))
+            if estrategia == "estructura" and principal:
+                for caso in fuera:
+                    pares = bd.similarity_search_with_relevance_scores(caso["consulta"], k=1)
+                    sims_fuera.append((caso, pares[0][1], pares[0][0]))
+            if principal:
+                posiciones[estrategia] = rangos
+            n = len(rangos)
+            acierto = lambda k: sum(1 for r in rangos if r and r <= k) / n
+            mrr = sum(1 / r for r in rangos if r) / n
+            largo = statistics.mean(len(f.page_content) for f in fragmentos)
+            mezclan = sum(1 for f in fragmentos if _unidades(f.page_content) > 1)
+            resumen.append(f"| {estrategia} | {tamano} | {len(fragmentos)} | {largo:.0f} | {mezclan} | {acierto(1):.0%} | "
+                           f"{acierto(3):.0%} | {acierto(5):.0%} | {mrr:.2f} |")
 
     for i, caso in enumerate(info):
         celdas = [str(posiciones[e][i]) if posiciones[e][i] else "✘ no está en el top 5" for e in ESTRATEGIAS]
@@ -229,7 +235,33 @@ def cmd_experimento_recuperacion(_args):
     max_fuera = max(s for _, s, _ in sims_fuera)
     umbral += ["", f"- Mínima similitud en dominio: **{min_info:.3f}** · Máxima fuera de dominio: **{max_fuera:.3f}**."]
 
-    _escribir("experimento_recuperacion.md", lineas + resumen + [""] + detalle + [""] + umbral)
+    # Devoluciones: ¿basta con buscar dentro de la política o hay que pasarla completa?
+    bd = construir_indice(fragmentar("estructura"), directorio=None, coleccion="exp_devoluciones")
+    politica = ["## 4. Devoluciones: buscar dentro de la política vs. pasarla completa", "",
+                "Para cada caso de devolución del Taller 1 se busca por similitud **dentro** de la política "
+                "(filtro `fuente = politica_devoluciones.pdf`, k = 4) y entre los productos (filtro `tipo = producto`). "
+                "*Secciones necesarias* son las reglas que hacen falta para decidir el caso.", "",
+                "| Caso | Consulta | Secciones necesarias | Top-4 de la política | ¿Llegan todas? | Producto en el 1.er puesto |",
+                "|---|---|---|---|---|---|"]
+    completos = 0
+    for caso in casos["devoluciones"]:
+        pares = bd.similarity_search_with_relevance_scores(
+            caso["consulta"], k=4, filter={"fuente": "politica_devoluciones.pdf"})
+        secciones = [d.metadata["seccion"].split(".")[0] for d, _ in pares]
+        ok = all(s in secciones for s in caso["secciones_politica"])
+        completos += ok
+        prod = bd.similarity_search_with_relevance_scores(caso["consulta"], k=1, filter={"tipo": "producto"})[0][0]
+        if caso["producto"]:
+            acierto = f"{_celda(caso['producto'])}: {'sí' if prod.metadata['seccion'] == caso['producto'] else 'no'}"
+        else:
+            acierto = f"no está en el catálogo (recupera: {_celda(prod.metadata['seccion'])})"
+        politica.append(f"| {caso['id']} | {_celda(caso['consulta'])} | {', '.join(caso['secciones_politica']) or '—'} | "
+                        f"{', '.join(secciones)} | {'sí' if ok else 'no'} | {acierto} |")
+    politica += ["", f"- Buscando por similitud, las reglas necesarias llegan en **{completos} de "
+                 f"{len(casos['devoluciones'])}** casos. Por eso la cadena recupera la política **entera por metadatos** "
+                 "y usa la similitud solo para elegir los productos (`src/cadena.py`, `contexto_devolucion`)."]
+
+    _escribir("experimento_recuperacion.md", lineas + resumen + [""] + detalle + [""] + umbral + [""] + politica)
 
 
 # ---------- Evaluación con LLM ----------

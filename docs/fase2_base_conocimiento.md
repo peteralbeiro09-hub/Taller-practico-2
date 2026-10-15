@@ -43,7 +43,7 @@ Al preparar los documentos se tomaron decisiones de calidad que afectan directam
 | **Tamaño fijo** | Corta cada N caracteres (`CharacterTextSplitter(separator="")`) | Simple y predecible | Parte reglas por la mitad y mezcla productos |
 | **Por párrafos** | Corta en cada línea en blanco y junta párrafos hasta N caracteres | Respeta párrafos | Si caben, junta **varios productos o preguntas** en un fragmento |
 | **Recursiva** | Intenta cortar por párrafo, luego por línea, luego por oración (`RecursiveCharacterTextSplitter`) | No corta oraciones si puede evitarlo | Aplicada a ciegas, no conoce las secciones ni las unidades del documento |
-| **Por estructura** ✅ (propuesta) | Usa la unidad natural de cada formato: sección en las políticas, pregunta en el FAQ, fila en el inventario. Solo recurre a la división recursiva si una sección supera 600 caracteres | Cada fragmento es **una idea completa** con metadatos | Requiere un *loader* por tipo de documento |
+| **Por estructura** ✅ (propuesta) | Usa la unidad natural de cada formato: sección en las políticas, pregunta en el FAQ, fila en el inventario. Solo recurre a la división recursiva si una sección supera 1000 caracteres | Cada fragmento es **una idea completa** con metadatos | Requiere un *loader* por tipo de documento |
 
 ### 3.2 La propuesta: segmentación por estructura del documento
 
@@ -51,49 +51,48 @@ Implementada en [`src/ingesta.py`](../src/ingesta.py):
 
 | Documento | Unidad de fragmento | Herramienta | Fragmentos |
 |---|---|---|---|
-| Política de devoluciones (PDF) | Una sección numerada ("4. Excepción…"); los pasos numerados de la sección 5 no se confunden con títulos | `PyPDFLoader` + detección de títulos consecutivos + `RecursiveCharacterTextSplitter` (600/80) | 7 |
-| Política de envíos (MD) | Una sección `##` | `MarkdownHeaderTextSplitter` + `RecursiveCharacterTextSplitter` (600/80) | 9 (la sección 2, con la tabla de zonas, se divide en 2) |
+| Política de devoluciones (PDF) | Una sección numerada ("4. Excepción…"); los pasos numerados de la sección 5 no se confunden con títulos | `PyPDFLoader` + detección de títulos consecutivos + `RecursiveCharacterTextSplitter` (1000/80) | 7 |
+| Política de envíos (MD) | Una sección `##` | `MarkdownHeaderTextSplitter` + `RecursiveCharacterTextSplitter` (1000/80) | 8 (una por sección, tabla de zonas completa) |
 | FAQ (JSON) | Un par pregunta-respuesta, **nunca se parte** | Un `Document` por elemento | 24 |
 | Inventario (CSV) | Un producto | Un `Document` por fila | 15 |
-| **Total** | | | **55** |
+| **Total** | | | **54** |
 
 **Por qué esta estrategia es la mejor para este caso:**
 
 - **La unidad de respuesta coincide con la unidad del documento.** Las preguntas de los clientes casi siempre se responden con *una* regla, *una* pregunta frecuente o *un* producto. Si el fragmento es exactamente eso, el LLM recibe la respuesta completa y nada más.
 - **No mezcla productos.** Es el riesgo más grave para EcoMarket. Si un fragmento tiene la botella (devolvible) y el café (no devolvible), el LLM puede atribuir al café la condición de la botella. Con la estrategia por estructura, **0 fragmentos** mezclan productos o preguntas; con párrafos son 10 y con tamaño fijo, 15 (tabla de §4).
-- **No corta reglas por la mitad.** Con tamaño fijo, la excepción por daño queda partida: "Adjunte al menos una foto en la que…" en un fragmento y "…se vea el daño o defecto" en el siguiente. El fragmento recuperado puede tener el plazo de 48 horas sin la condición de la foto, o al revés. Se puede verificar con `python app.py fragmentos --estrategia fijo`.
+- **No corta reglas por la mitad.** Con tamaño fijo (1000 caracteres) la excepción por daño queda partida a mitad de palabra: "…reposición o reembolso completo, incl" en un fragmento y "uso si el producto no es devolvible…" en el siguiente. Lo mismo pasa con el reembolso: "El reembolso se hace al medio de pago original" en uno y "dentro de los 10 días hábiles…" en otro. El fragmento recuperado puede traer la regla sin su plazo, o el plazo sin la regla. Se puede verificar con `python app.py fragmentos --estrategia fijo --fuente politica_devoluciones.pdf`.
 - **Metadatos útiles.** Cada fragmento lleva `fuente`, `tipo`, `seccion` y, en productos, `sku`, `categoria` y `devolvible`. Sirven para tres cosas:
   1. **Citar la fuente:** el prompt v2 numera los fragmentos y el modelo cita [1], [2].
   2. **Filtrar:** el flujo de devoluciones busca solo en la política de devoluciones y en los productos.
   3. **Auditar:** se puede ver de qué sección salió cada respuesta.
-- **Tamaño 600 / solape 80.** Ninguna sección de las políticas supera ~900 caracteres. Con 600, casi todas quedan en un fragmento (~150 tokens, muy por debajo de los 512 del modelo E5), y el solape de 80 caracteres conserva el contexto cuando una sección larga se divide. Los dos valores se pueden cambiar en `.env` (`RAG_CHUNK_TAMANO`, `RAG_CHUNK_SOLAPE`).
+- **Tamaño máximo 1000 / solape 80.** Ninguna sección de las políticas supera ~900 caracteres, así que con 1000 **cada sección es exactamente un fragmento** (~250 tokens, por debajo de los 512 del modelo E5). El tamaño es una red de seguridad para cuando una sección crezca: la división recursiva corta por párrafo y el solape de 80 caracteres conserva el contexto. Empezamos con 600 y la evaluación con el LLM nos hizo cambiarlo (§4). Los dos valores se pueden cambiar en `.env` (`RAG_CHUNK_TAMANO`, `RAG_CHUNK_SOLAPE`).
 
 ## 4. Evidencia: comparación medida de las estrategias
 
-`python app.py experimento-recuperacion` indexa la base con las tres estrategias y mide, **sin llamar al LLM**, en qué posición aparece el fragmento que contiene la evidencia de cada una de las 12 preguntas de prueba. El resultado completo está en [`results/experimento_recuperacion.md`](../results/experimento_recuperacion.md):
+`python app.py experimento-recuperacion` indexa la base con las tres estrategias y dos tamaños máximos, y mide **sin llamar al LLM** en qué posición aparece el fragmento con la evidencia de cada una de las 12 preguntas de prueba. El resultado completo está en [`results/experimento_recuperacion.md`](../results/experimento_recuperacion.md):
 
-| Estrategia | Fragmentos | Largo medio | Mezclan varios productos o preguntas | Acierto@1 | Acierto@3 | MRR |
-|---|---|---|---|---|---|---|
-| **Por estructura** ✅ | 55 | 329 | **0** | 75 % | **100 %** | 0,86 |
-| Por párrafos | 36 | 516 | 10 | 92 % | 100 % | 0,96 |
-| Tamaño fijo | 34 | 548 | 15 | 42 % | 75 % | 0,61 |
+| Estrategia | Tamaño máx. | Fragmentos | Largo medio | Mezclan varios productos o preguntas | Acierto@1 | Acierto@3 | MRR |
+|---|---|---|---|---|---|---|---|
+| **Por estructura** ✅ | 600 | 55 | 329 | **0** | 75 % | **100 %** | 0,86 |
+| **Por estructura** ✅ | **1000** | 54 | 335 | **0** | 75 % | **100 %** | 0,85 |
+| Por párrafos | 600 | 36 | 516 | 10 | 92 % | 100 % | 0,96 |
+| Por párrafos | 1000 | 21 | 886 | 15 | 67 % | 83 % | 0,79 |
+| Tamaño fijo | 600 | 34 | 548 | 15 | 42 % | 75 % | 0,61 |
+| Tamaño fijo | 1000 | 20 | 931 | 13 | 50 % | 83 % | 0,67 |
 
 **Lectura honesta de los resultados:**
 
-- **El tamaño fijo es claramente el peor.** Solo en 5 de 12 preguntas el fragmento correcto queda primero, y en 3 ni siquiera entra en los 3 primeros.
-- **Por párrafos gana en acierto@1, por una razón que no es mérito propio:** sus fragmentos son 57 % más largos y juntan varias preguntas o productos. Un fragmento más grande tiene más probabilidad de "contener" la evidencia. El costo es que **10 fragmentos mezclan unidades**, justo el riesgo de atribución cruzada que describimos arriba, y que el LLM recibe más texto irrelevante.
-- **Con k = 4, que es lo que usa el sistema, la estrategia por estructura recupera el fragmento correcto en el 100 % de los casos**, con fragmentos limpios. Eso es lo que importa, porque el LLM recibe los 4 primeros y no solo el primero. Por eso se mantiene como propuesta.
+- **El tamaño fijo es el peor** con cualquier tamaño: parte reglas y mezcla productos, y en algunas preguntas el fragmento correcto ni siquiera entra entre los 5 primeros.
+- **Por párrafos, con 600, gana en acierto@1, por una razón que no es mérito propio:** sus fragmentos son más largos y juntan varias preguntas o productos, y un fragmento más grande tiene más probabilidad de "contener" la evidencia. El costo es que **10 fragmentos mezclan unidades** (el riesgo de atribución cruzada de §3.2) y que el LLM recibe más texto irrelevante. Además, es **frágil**: con 1000 caracteres junta todavía más, cae a 83 % en acierto@3 y mezcla 15 fragmentos.
+- **Por estructura es estable:** con 600 o con 1000 recupera el fragmento correcto entre los 3 primeros en el **100 %** de los casos, y nunca mezcla productos ni preguntas. El tamaño casi no la afecta porque sus cortes los decide la estructura del documento, no el contador de caracteres. Como el sistema le pasa al LLM los 4 primeros fragmentos (k = 4), lo que importa es el acierto@3–4 y la limpieza de los fragmentos, no solo el primer puesto.
 
-**Una iteración que el experimento obligó a hacer.** En la primera versión, cada fragmento de las políticas empezaba con un encabezado contextual: "Política de envíos de EcoMarket — 3. Costo del envío". La idea parecía buena, pero el experimento mostró lo contrario:
+**Dos iteraciones que los experimentos obligaron a hacer:**
 
-| Variante (estructura, 600) | Acierto@1 | Acierto@3 | Posición de "¿Hacen envíos a México?" |
-|---|---|---|---|
-| Con el título del documento en el texto | 75 % | 92 % | 5 (queda **fuera** de k = 4) |
-| Sin el título en el texto (versión final) | 75 % | **100 %** | 3 |
+1. **Quitar el encabezado contextual del texto.** En la primera versión, cada fragmento de las políticas empezaba con "Política de envíos de EcoMarket — 3. Costo del envío". El experimento mostró que ese título repetido hace que **todos** los fragmentos de un documento se parezcan entre sí: "¿Hacen envíos a México?" quedaba en el puesto 5, fuera de k = 4, y el acierto@3 era de 92 %. Sin él subió a **100 %**. Ahora el título y la sección viven en los **metadatos**, y el LLM los sigue viendo porque `formatear_contexto()` antepone "fuente › sección" a cada fragmento.
+2. **Subir el tamaño máximo de 600 a 1000.** Con 600, la sección "2. Tiempos de entrega" se partía en dos y la fila "Zona 4: San Andrés…" quedaba **separada del encabezado de la tabla**. En la evaluación con el LLM, el caso I12 ("confírmame que el envío a San Andrés es gratis") falló por eso: el modelo recibió "la zona 4 paga $29.900", pero no que San Andrés es zona 4, y respondió con razón que no tenía esa información ([`results/resultados_rag_iteracion1.md`](../results/resultados_rag_iteracion1.md)). Con 1000, cada sección queda entera y la tabla completa entra en el top 4 de esa consulta. Es un ejemplo directo de cómo **la forma de dividir el documento cambia la respuesta final**.
 
-El título repetido hace que **todos** los fragmentos de un documento se parezcan entre sí, y así se diluye lo que distingue a cada sección. Ahora el título y la sección viven en los **metadatos**, y el LLM los sigue viendo porque `formatear_contexto()` antepone "fuente › sección" a cada fragmento.
-
-**Limitación del experimento:** son 12 preguntas, así que una diferencia de un caso equivale a 8 puntos porcentuales. Sirve para descartar estrategias malas (tamaño fijo) y detectar problemas concretos (el encabezado), no para afinar decimales.
+**Limitación del experimento:** son 12 preguntas, así que una diferencia de un caso equivale a 8 puntos porcentuales. Sirve para descartar estrategias malas (tamaño fijo) y detectar problemas concretos (encabezado, tabla partida), no para afinar decimales.
 
 ## 5. Indexación
 
@@ -110,9 +109,9 @@ flowchart LR
         T2 --> S2[MarkdownHeaderTextSplitter]
         T3 --> S3[1 pregunta = 1 fragmento]
         T4 --> S4[1 producto = 1 fragmento]
-        S1 & S2 --> R[RecursiveCharacterTextSplitter<br/>600 / 80 si la sección es larga]
+        S1 & S2 --> R[RecursiveCharacterTextSplitter<br/>1000 / 80 si la sección es larga]
     end
-    R --> D[55 Document<br/>texto + metadatos + id estable]
+    R --> D[54 Document<br/>texto + metadatos + id estable]
     S3 --> D
     S4 --> D
     D -->|"passage: " + texto| E[multilingual-e5-small<br/>vectores de 384 dim, normalizados]

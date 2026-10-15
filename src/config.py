@@ -23,9 +23,11 @@ MODELO_EMBEDDINGS = os.getenv("RAG_MODELO_EMBEDDINGS", "intfloat/multilingual-e5
 COLECCION = "ecomarket"
 RAG_K = int(os.getenv("RAG_K", "4"))
 # Similitud coseno mínima para considerar que un fragmento es relevante. Calibrada con `python app.py buscar`
-# (ver docs/fase3_integracion.md §4): por debajo de este valor el asistente admite que no tiene la información.
+# (ver docs/fase3_integracion.md §3): por debajo de este valor el asistente admite que no tiene la información.
 RAG_UMBRAL = float(os.getenv("RAG_UMBRAL", "0.80"))
-CHUNK_TAMANO = int(os.getenv("RAG_CHUNK_TAMANO", "600"))
+# 1000 caracteres: ninguna sección de las políticas lo supera, así que cada sección (incluida la tabla de zonas
+# de envío) queda en un solo fragmento. Con 600 la tabla se partía (docs/fase2_base_conocimiento.md §4).
+CHUNK_TAMANO = int(os.getenv("RAG_CHUNK_TAMANO", "1000"))
 CHUNK_SOLAPE = int(os.getenv("RAG_CHUNK_SOLAPE", "80"))
 
 

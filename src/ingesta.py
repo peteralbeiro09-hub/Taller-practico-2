@@ -83,14 +83,14 @@ def documentos_completos() -> list[Document]:
 
 # ---------- Segmentación por estructura (la propuesta) ----------
 
-def _divisor_recursivo() -> RecursiveCharacterTextSplitter:
+def _divisor_recursivo(tamano: int) -> RecursiveCharacterTextSplitter:
     """Para secciones largas: intenta cortar primero por párrafo, luego por línea y luego por oración."""
     return RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_TAMANO, chunk_overlap=CHUNK_SOLAPE, separators=["\n\n", "\n", ". ", " ", ""]
+        chunk_size=tamano, chunk_overlap=CHUNK_SOLAPE, separators=["\n\n", "\n", ". ", " ", ""]
     )
 
 
-def _secciones(titulo_doc: str, secciones: list[tuple[str, str]], metadata: dict) -> list[Document]:
+def _secciones(titulo_doc: str, secciones: list[tuple[str, str]], metadata: dict, tamano: int) -> list[Document]:
     """Un fragmento por sección (o varios si la sección es larga). El documento y la sección van en los
     metadatos, no en el texto que se vectoriza.
 
@@ -100,7 +100,7 @@ def _secciones(titulo_doc: str, secciones: list[tuple[str, str]], metadata: dict
     Sin él, el acierto@3 pasa de 92 % a 100 % (docs/fase2_base_conocimiento.md §4). El modelo sigue viendo
     la procedencia porque formatear_contexto() antepone "fuente › sección" a cada fragmento.
     """
-    divisor = _divisor_recursivo()
+    divisor = _divisor_recursivo(tamano)
     fragmentos = []
     for seccion, cuerpo in secciones:
         for parte in divisor.split_text(cuerpo.strip()):
@@ -111,7 +111,7 @@ def _secciones(titulo_doc: str, secciones: list[tuple[str, str]], metadata: dict
     return fragmentos
 
 
-def _chunks_politica_pdf() -> list[Document]:
+def _chunks_politica_pdf(tamano: int) -> list[Document]:
     """El PDF pierde el formato Markdown, pero conserva los títulos numerados ("4. Excepción: ...").
 
     Un título es una línea "N. Texto" corta, sin punto final y con el número consecutivo al título anterior;
@@ -130,15 +130,15 @@ def _chunks_politica_pdf() -> list[Document]:
         elif secciones:
             secciones[-1][1].append(linea)
     return _secciones(titulo_doc, [(s, "\n".join(c)) for s, c in secciones],
-                                 {"fuente": PDF_POLITICA.name, "tipo": "politica"})
+                     {"fuente": PDF_POLITICA.name, "tipo": "politica"}, tamano)
 
 
-def _chunks_envios_md() -> list[Document]:
+def _chunks_envios_md(tamano: int) -> list[Document]:
     divisor_md = MarkdownHeaderTextSplitter(headers_to_split_on=[("#", "documento"), ("##", "seccion")])
     bloques = divisor_md.split_text(MD_ENVIOS.read_text(encoding="utf-8"))
     titulo_doc = bloques[0].metadata.get("documento", "Política de envíos de EcoMarket")
     secciones = [(b.metadata["seccion"], b.page_content) for b in bloques if "seccion" in b.metadata]
-    return _secciones(titulo_doc, secciones, {"fuente": MD_ENVIOS.name, "tipo": "politica"})
+    return _secciones(titulo_doc, secciones, {"fuente": MD_ENVIOS.name, "tipo": "politica"}, tamano)
 
 
 def _chunks_faq() -> list[Document]:
@@ -165,7 +165,7 @@ def _chunks_inventario() -> list[Document]:
 def fragmentar(estrategia: str = "estructura", tamano: int = CHUNK_TAMANO) -> list[Document]:
     """Devuelve los fragmentos de toda la base de conocimiento según la estrategia, con un id estable en metadata."""
     if estrategia == "estructura":
-        fragmentos = _chunks_politica_pdf() + _chunks_envios_md() + _chunks_faq() + _chunks_inventario()
+        fragmentos = _chunks_politica_pdf(tamano) + _chunks_envios_md(tamano) + _chunks_faq() + _chunks_inventario()
     elif estrategia == "parrafos":
         divisor = CharacterTextSplitter(separator="\n\n", chunk_size=tamano, chunk_overlap=0)
         fragmentos = divisor.split_documents(documentos_completos())
